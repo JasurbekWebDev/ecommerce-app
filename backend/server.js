@@ -1,32 +1,28 @@
-// server.js
-// 1. Kerakli kutubxonalarni loyihaga chaqirib olamiz (Import)
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
-require('dotenv').config(); // .env faylidagi o'zgaruvchilarni o'qish uchun
+require('dotenv').config();
 
 const app = express();
 
-// 2. Middleware-larni sozlaymiz
-app.use(cors()); // Boshqa domenlardan keladigan so'rovlarga ruxsat berish
-app.use(express.json()); // Serverga kelayotgan JSON ma'lumotlarni o'qiy olish formatiga keltirish
+// Middleware
+app.use(cors());
+app.use(express.json());
 
-// 3. MongoDB bazasiga ulanish
+// MongoDB Database Connection
 mongoose.connect(process.env.MONGO_URI)
     .then(() => console.log("✅ MongoDB bazasiga ulandik!"))
     .catch((err) => console.error("❌ Baza bilan ulanishda xato:", err));
 
-// 4. Ma'lumotlar sxemasini tuzamiz (Database Schemas)
-// Foydalanuvchilar jadvali tuzilishi
+// Database Schemas & Models
 const UserSchema = new mongoose.Schema({
     username: { type: String, required: true, unique: true },
     password: { type: String, required: true }
 });
 const User = mongoose.model('User', UserSchema);
 
-// Mahsulotlar jadvali tuzilishi
 const ProductSchema = new mongoose.Schema({
     name: { type: String, required: true },
     price: { type: Number, required: true },
@@ -34,100 +30,126 @@ const ProductSchema = new mongoose.Schema({
 });
 const Product = mongoose.model('Product', ProductSchema);
 
-// 5. Auth Middleware (Tokenni tekshirish funksiyasi)
-// Bu funksiya maxfiy sahifalarga kirayotganda foydalanuvchida token borligini tekshiradi
+// Auth Middleware (Token Verification)
 const verifyToken = (req, res, next) => {
-    const token = req.headers['authorization']?.split(' ')[1]; // Headerdan tokenni ajratib olish
+    const authHeader = req.headers['authorization'];
+    const token = authHeader && authHeader.split(' ')[1];
+    
     if (!token) return res.status(401).json({ message: "Kirish taqiqlangan, token yo'q!" });
 
     try {
         const decoded = jwt.verify(token, process.env.JWT_SECRET);
-        req.userId = decoded.userId; // Token ichidagi foydalanuvchi ID-sini so'rovga biriktirish
-        next(); // Keyingi bosqichga o'tishga ruxsat
+        req.userId = decoded.userId;
+        next();
     } catch (err) {
         res.status(403).json({ message: "Yaroqsiz yoki eskirgan token!" });
     }
 };
 
-// 6. API Yo'nalishlari (Routes)
+// --- API ROUTES ---
 
-// Regstratsiya (Ro'yxatdan o'tish)
-// 📑 Buni backend/server.js ichidagi eski app.post('/api/login', ...) o'rniga qo'ying:
+// 1. Foydalanuvchini ro'yxatdan o'tkazish (REGISTER)
+app.post('/api/register', async (req, res) => {
+    try {
+        const { username, password } = req.body;
+        if (!username || !password) {
+            return res.status(400).json({ message: "Barcha maydonlarni to'ldiring!" });
+        }
 
+        const cleanUsername = username.trim();
+
+        // Ism bandligini tekshirish (Case-Insensitive)
+        const existingUser = await User.findOne({ 
+            username: { $regex: new RegExp("^" + cleanUsername + "$", "i") } 
+        });
+        if (existingUser) {
+            return res.status(400).json({ message: "Bu nom band, boshqasini tanlang!" });
+        }
+
+        // Parolni shifrlash
+        const hashedPassword = await bcrypt.hash(password, 10);
+        
+        const newUser = new User({ username: cleanUsername, password: hashedPassword });
+        await newUser.save();
+
+        return res.status(201).json({ message: "Foydalanuvchi muvaffaqiyatli yaratildi!" });
+    } catch (err) {
+        console.error(err);
+        return res.status(500).json({ message: "Serverda ichki xatolik yuz berdi!" });
+    }
+});
+
+// 2. Tizimga kirish (LOGIN)
 app.post('/api/login', async (req, res) => {
     try {
         const { username, password } = req.body;
+        if (!username || !password) {
+            return res.status(400).json({ message: "Barcha maydonlarni to'ldiring!" });
+        }
 
-        // 1. Kiritilgan ismdagi ortiqcha bo'shliqlarni olib tashlaymiz va kichik harfga o'giramiz (Xavfsizlik uchun)
         const cleanUsername = username.trim();
 
-        // 2. Bazadan foydalanuvchini qidiramiz (Katta-kichik harfga sezgirlikni yo'qotish uchun regex ishlatamiz)
+        // Foydalanuvchini bazadan qidirish (Case-Insensitive)
         const user = await User.findOne({ 
             username: { $regex: new RegExp("^" + cleanUsername + "$", "i") } 
         });
-
         if (!user) {
             return res.status(400).json({ message: "Foydalanuvchi topilmadi!" });
         }
 
-        // 3. Parolni tekshiramiz
+        // Parolni tekshirish
         const isMatch = await bcrypt.compare(password, user.password);
         if (!isMatch) {
             return res.status(400).json({ message: "Noto'g'ri parol!" });
         }
 
-        // 4. Token yaratamiz
+        // Token berish (1 soat amal qiladi)
         const token = jwt.sign({ userId: user._id }, process.env.JWT_SECRET, { expiresIn: '1h' });
         
-        // Hammasi joyida bo'lsa JSON ma'lumot yuboramiz
         return res.json({ token, username: user.username });
-
-    } catch (error) {
-        console.error("Login xatoligi:", error);
+    } catch (err) {
+        console.error(err);
         return res.status(500).json({ message: "Serverda ichki xatolik yuz berdi!" });
     }
 });
 
-
-// Login (Tizimga kirish)
-app.post('/api/login', async (req, res) => {
-    const { username, password } = req.body;
-    const user = await User.findOne({ username });
-    if (!user) return res.status(400).json({ message: "Foydalanuvchi topilmadi!" });
-
-    // Kiritilgan parolni bazadagi shifrlangan parol bilan solishtirish
-    const isMatch = await bcrypt.compare(password, user.password);
-    if (!isMatch) return res.status(400).json({ message: "Noto'g'ri parol!" });
-
-    // Foydalanuvchiga 1 soat amal qiladigan token beramiz
-    const token = jwt.sign({ userId: user._id }, process.env.JWT_SECRET, { expiresIn: '1h' });
-    res.json({ token, username });
-});
-
-// Hamma mahsulotlarni olish (Hamma ko'ra oladi)
+// 3. Hamma mahsulotlarni olish (GET)
 app.get('/api/products', async (req, res) => {
-    const products = await Product.find();
-    res.json(products);
-});
-
-// Yangi mahsulot qo'shish (Faqat tizimga kirganlar uchun - verifyToken bor)
-app.post('/api/products', verifyToken, async (req, res) => {
     try {
-        const { name, price, category, date } = req.body;
-        const newProduct = new Product({ name, price, category });
-        await newProduct.save();
-        res.status(201).json(newProduct);
+        const products = await Product.find();
+        return res.json(products);
     } catch (err) {
-        res.status(500).json({ message: "Mahsulot qo'shishda xatolik!" });
+        return res.status(500).json({ message: "Mahsulotlarni yuklashda xatolik!" });
     }
 });
 
-// Mahsulotni o'chirish (Faqat tizimga kirganlar uchun)
-app.delete('/api/products/:id', verifyToken, async (req, res) => {
-    await Product.findByIdAndDelete(req.params.id);
-    res.json({ message: "Mahsulot o'chirildi!" });
+// 4. Yangi mahsulot qo'shish (POST - Himoyalangan)
+app.post('/api/products', verifyToken, async (req, res) => {
+    try {
+        const { name, price, category } = req.body;
+        if (!name || !price || !category) {
+            return res.status(400).json({ message: "Ma'lumotlar to'liq emas!" });
+        }
+
+        const newProduct = new Product({ name, price: Number(price), category });
+        await newProduct.save();
+        
+        return res.status(201).json(newProduct);
+    } catch (err) {
+        return res.status(500).json({ message: "Mahsulot qo'shishda xatolik!" });
+    }
 });
 
-// 7. Serverni portga qo'yish
+// 5. Mahsulotni o'chirish (DELETE - Himoyalangan)
+app.delete('/api/products/:id', verifyToken, async (req, res) => {
+    try {
+        await Product.findByIdAndDelete(req.params.id);
+        return res.json({ message: "Mahsulot o'chirildi!" });
+    } catch (err) {
+        return res.status(500).json({ message: "O'chirishda xatolik yuz berdi!" });
+    }
+});
+
+// Server Port Settings
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => console.log(`🚀 Backend server ${PORT}-portda yonib turibdi...`));
