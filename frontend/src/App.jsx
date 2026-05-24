@@ -2,7 +2,9 @@
 import { useState, useEffect, useCallback } from 'react'
 
 // Asosiy API manzili (Backend manzili)
-const API_URL = 'http://localhost:5000/api'
+// ✅ Kod o'zi qayerda ishlayotganiga qarab havolani avtomatik tanlaydi
+const API_URL = import.meta.env.VITE_API_URL;
+
 
 function App () {
   // --- STATE-LAR (Ma'lumotlarni saqlash xotirasi) ---
