@@ -37,7 +37,7 @@ function App() {
 
   // Ro'yxatdan o'tish va Kirish funksiyasi (POST)
   const handleAuth = (e) => {
-    e.preventDefault(); // Sahifa qayta yuklanib ketishini oldini oladi
+    e.preventDefault(); 
     const endpoint = authMode === 'login' ? 'login' : 'register';
 
     fetch(`${API_URL}/${endpoint}`, {
@@ -45,19 +45,29 @@ function App() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ username: formUser, password: formPass })
     })
-    .then(res => res.json())
+    .then(res => {
+      // ⚠️ JAVOBNI TEKSHIRISH: Agar backend xato (400, 500) qaytarsa, to'g'ridan-to'g'ri json-ga o'tmaydi
+      if (!res.ok) {
+        throw new Error("Login yoki parol noto'g'ri yoki serverda xato!");
+      }
+      return res.json();
+    })
     .then(data => {
       if (data.token) {
-        // Agar tizimga muvaffaqiyatli kirsak, token va ism brauzerga saqlanadi
         localStorage.setItem('token', data.token);
         localStorage.setItem('username', data.username);
         setToken(data.token);
         setUsername(data.username);
         setFormUser(''); setFormPass('');
       } else {
-        alert(data.message);
-        if(authMode === 'register') setAuthMode('login'); // Registratsiyadan keyin loginga o'tkazish
+        alert(data.message || "Muvaffaqiyatli!");
+        if(authMode === 'register') setAuthMode('login'); 
       }
+    })
+    .catch(err => {
+      // 🛑 HTML xatosini konsolga chiqarmasdan, foydalanuvchiga chiroyli ogohlantirish beradi
+      console.error(err);
+      alert("Kirishda xatolik yuz berdi! Parol yoki foydalanuvchi nomini tekshiring.");
     });
   };
 
