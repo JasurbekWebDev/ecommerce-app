@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 
 // Asosiy API manzili (Backend manzili)
-const API_URL = 'https://ecommerce-backend-app-c9bp.onrender.com';
+const API_URL = 'https://ecommerce-backend-app-c9bp.onrender.com/api';
 
 function App() {
   // --- STATE-LAR (Ma'lumotlarni saqlash xotirasi) ---
