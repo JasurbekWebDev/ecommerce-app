@@ -1,16 +1,27 @@
+// ⚠️ 1. ENG BIRINCHI .env FAYLINI O'QISH SHART (Buni eng tepaga qo'yamiz)
+require('dotenv').config(); 
+
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
-require('dotenv').config();
 
 const app = express();
-
-// Middleware
 app.use(cors());
 app.use(express.json());
 
+// ==========================================
+// 🛠️ 2. IKKALA BAZAGA PARALLEL ULANISH (Eski mongoose.connect() butunlay o'chirilishi shart)
+// ==========================================
+const localConn = mongoose.createConnection(process.env.LOCAL_MONGO_URI);
+const atlasConn = mongoose.createConnection(process.env.ATLAS_MONGO_URI);
+
+localConn.on('connected', () => console.log("✅ 1/2: Lokal MongoDB-ga ulandik!"));
+localConn.on('error', (err) => console.error("❌ Lokal bazada xato:", err));
+
+atlasConn.on('connected', () => console.log("✅ 2/2: Bulutli MongoDB Atlas-ga ulandik!"));
+atlasConn.on('error', (err) => console.error("❌ Atlas bazasida xato:", err));
 // MongoDB Database Connection
 mongoose.connect(process.env.MONGO_URI)
     .then(() => console.log("✅ MongoDB bazasiga ulandik!"))
