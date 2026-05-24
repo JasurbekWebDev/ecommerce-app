@@ -1,3 +1,4 @@
+// server.js
 // 1. Kerakli kutubxonalarni loyihaga chaqirib olamiz (Import)
 const express = require('express');
 const mongoose = require('mongoose');

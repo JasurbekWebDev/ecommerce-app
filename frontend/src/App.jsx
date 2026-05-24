@@ -1,3 +1,4 @@
+// App.jsx
 import { useState, useEffect, useCallback } from 'react';
 
 // Asosiy API manzili (Backend manzili)
