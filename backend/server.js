@@ -52,19 +52,42 @@ const verifyToken = (req, res, next) => {
 // 6. API Yo'nalishlari (Routes)
 
 // Regstratsiya (Ro'yxatdan o'tish)
-app.post('/api/register', async (req, res) => {
+// 📑 Buni backend/server.js ichidagi eski app.post('/api/login', ...) o'rniga qo'ying:
+
+app.post('/api/login', async (req, res) => {
     try {
         const { username, password } = req.body;
-        // Parolni shifrlaymiz (10 darajali xavfsizlik bilan)
-        const hashedPassword = await bcrypt.hash(password, 10);
+
+        // 1. Kiritilgan ismdagi ortiqcha bo'shliqlarni olib tashlaymiz va kichik harfga o'giramiz (Xavfsizlik uchun)
+        const cleanUsername = username.trim();
+
+        // 2. Bazadan foydalanuvchini qidiramiz (Katta-kichik harfga sezgirlikni yo'qotish uchun regex ishlatamiz)
+        const user = await User.findOne({ 
+            username: { $regex: new RegExp("^" + cleanUsername + "$", "i") } 
+        });
+
+        if (!user) {
+            return res.status(400).json({ message: "Foydalanuvchi topilmadi!" });
+        }
+
+        // 3. Parolni tekshiramiz
+        const isMatch = await bcrypt.compare(password, user.password);
+        if (!isMatch) {
+            return res.status(400).json({ message: "Noto'g'ri parol!" });
+        }
+
+        // 4. Token yaratamiz
+        const token = jwt.sign({ userId: user._id }, process.env.JWT_SECRET, { expiresIn: '1h' });
         
-        const newUser = new User({ username, password: hashedPassword });
-        await newUser.save(); // Bazaga saqlash
-        res.status(201).json({ message: "Foydalanuvchi muvaffaqiyatli yaratildi!" });
-    } catch (err) {
-        res.status(400).json({ message: "Bu nom band, boshqa nom tanlang!" });
+        // Hammasi joyida bo'lsa JSON ma'lumot yuboramiz
+        return res.json({ token, username: user.username });
+
+    } catch (error) {
+        console.error("Login xatoligi:", error);
+        return res.status(500).json({ message: "Serverda ichki xatolik yuz berdi!" });
     }
 });
+
 
 // Login (Tizimga kirish)
 app.post('/api/login', async (req, res) => {
