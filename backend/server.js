@@ -1,4 +1,4 @@
-// ⚠️ 1. ENG BIRINCHI .env FAYLINI O'QISH SHART (Buni eng tepaga qo'yamiz)
+// 1. Eng birinchi .env faylini o'qiymiz
 require('dotenv').config(); 
 
 const express = require('express');
@@ -8,11 +8,13 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 
 const app = express();
+
+// Middleware sozlamalari
 app.use(cors());
 app.use(express.json());
 
 // ==========================================
-// 🛠️ 2. IKKALA BAZAGA PARALLEL ULANISH (Eski mongoose.connect() butunlay o'chirilishi shart)
+// 🛠️ IKKALA BAZAGA PARALLEL ULANISH TIZIMI
 // ==========================================
 const localConn = mongoose.createConnection(process.env.LOCAL_MONGO_URI);
 const atlasConn = mongoose.createConnection(process.env.ATLAS_MONGO_URI);
@@ -22,26 +24,31 @@ localConn.on('error', (err) => console.error("❌ Lokal bazada xato:", err));
 
 atlasConn.on('connected', () => console.log("✅ 2/2: Bulutli MongoDB Atlas-ga ulandik!"));
 atlasConn.on('error', (err) => console.error("❌ Atlas bazasida xato:", err));
-// MongoDB Database Connection
-mongoose.connect(process.env.MONGO_URI)
-    .then(() => console.log("✅ MongoDB bazasiga ulandik!"))
-    .catch((err) => console.error("❌ Baza bilan ulanishda xato:", err));
 
-// Database Schemas & Models
+// ==========================================
+// 📊 DATABASE SCHEMAS & MODELS
+// ==========================================
 const UserSchema = new mongoose.Schema({
-    username: { type: String, required: true, unique: true },
+    username: { type: String, required: true },
     password: { type: String, required: true }
 });
-const User = mongoose.model('User', UserSchema);
 
 const ProductSchema = new mongoose.Schema({
     name: { type: String, required: true },
     price: { type: Number, required: true },
     category: { type: String, required: true }
 });
-const Product = mongoose.model('Product', ProductSchema);
 
-// Auth Middleware (Token Verification)
+// Modellarni ikkala alohida ulanishga bog'laymiz
+const LocalUser = localConn.model('User', UserSchema);
+const AtlasUser = atlasConn.model('User', UserSchema);
+
+const LocalProduct = localConn.model('Product', ProductSchema);
+const AtlasProduct = atlasConn.model('Product', ProductSchema);
+
+// ==========================================
+// 🚦 AUTH MIDDLEWARE (TOKEN TEKSHIRISH)
+// ==========================================
 const verifyToken = (req, res, next) => {
     const authHeader = req.headers['authorization'];
     const token = authHeader && authHeader.split(' ')[1];
@@ -57,9 +64,11 @@ const verifyToken = (req, res, next) => {
     }
 };
 
-// --- API ROUTES ---
+// ==========================================
+// 🚀 API ROUTES (PARALLEL SAQLASH)
+// ==========================================
 
-// 1. Foydalanuvchini ro'yxatdan o'tkazish (REGISTER)
+// 1. RO'YXATDAN O'TISH (REGISTER)
 app.post('/api/register', async (req, res) => {
     try {
         const { username, password } = req.body;
@@ -69,28 +78,31 @@ app.post('/api/register', async (req, res) => {
 
         const cleanUsername = username.trim();
 
-        // Ism bandligini tekshirish (Case-Insensitive)
-        const existingUser = await User.findOne({ 
+        // Lokal bazadan bandlikni tekshiramiz
+        const existingUser = await LocalUser.findOne({ 
             username: { $regex: new RegExp("^" + cleanUsername + "$", "i") } 
         });
         if (existingUser) {
             return res.status(400).json({ message: "Bu nom band, boshqasini tanlang!" });
         }
 
-        // Parolni shifrlash
         const hashedPassword = await bcrypt.hash(password, 10);
-        
-        const newUser = new User({ username: cleanUsername, password: hashedPassword });
-        await newUser.save();
 
-        return res.status(201).json({ message: "Foydalanuvchi muvaffaqiyatli yaratildi!" });
+        // Bir vaqtning o'zida ikkala bazaga ham saqlaymiz
+        const newLocalUser = new LocalUser({ username: cleanUsername, password: hashedPassword });
+        const savedLocal = await newLocalUser.save();
+
+        const newAtlasUser = new AtlasUser({ _id: savedLocal._id, username: cleanUsername, password: hashedPassword });
+        await newAtlasUser.save();
+
+        return res.status(201).json({ message: "Foydalanuvchi ikkala bazada ham yaratildi!" });
     } catch (err) {
         console.error(err);
         return res.status(500).json({ message: "Serverda ichki xatolik yuz berdi!" });
     }
 });
 
-// 2. Tizimga kirish (LOGIN)
+// 2. TIZIMGA KIRISH (LOGIN)
 app.post('/api/login', async (req, res) => {
     try {
         const { username, password } = req.body;
@@ -100,23 +112,20 @@ app.post('/api/login', async (req, res) => {
 
         const cleanUsername = username.trim();
 
-        // Foydalanuvchini bazadan qidirish (Case-Insensitive)
-        const user = await User.findOne({ 
+        // Lokal bazadan foydalanuvchini tekshiramiz
+        const user = await LocalUser.findOne({ 
             username: { $regex: new RegExp("^" + cleanUsername + "$", "i") } 
         });
         if (!user) {
             return res.status(400).json({ message: "Foydalanuvchi topilmadi!" });
         }
 
-        // Parolni tekshirish
         const isMatch = await bcrypt.compare(password, user.password);
         if (!isMatch) {
             return res.status(400).json({ message: "Noto'g'ri parol!" });
         }
 
-        // Token berish (1 soat amal qiladi)
         const token = jwt.sign({ userId: user._id }, process.env.JWT_SECRET, { expiresIn: '1h' });
-        
         return res.json({ token, username: user.username });
     } catch (err) {
         console.error(err);
@@ -124,17 +133,18 @@ app.post('/api/login', async (req, res) => {
     }
 });
 
-// 3. Hamma mahsulotlarni olish (GET)
+// 3. MAHSULOTLARNI OLISH (GET)
 app.get('/api/products', async (req, res) => {
     try {
-        const products = await Product.find();
+        // Tezroq ishlashi uchun lokal bazadan o'qiydi
+        const products = await LocalProduct.find();
         return res.json(products);
     } catch (err) {
         return res.status(500).json({ message: "Mahsulotlarni yuklashda xatolik!" });
     }
 });
 
-// 4. Yangi mahsulot qo'shish (POST - Himoyalangan)
+// 4. YANGI MAHSULOT QO'SHISH (POST)
 app.post('/api/products', verifyToken, async (req, res) => {
     try {
         const { name, price, category } = req.body;
@@ -142,25 +152,32 @@ app.post('/api/products', verifyToken, async (req, res) => {
             return res.status(400).json({ message: "Ma'lumotlar to'liq emas!" });
         }
 
-        const newProduct = new Product({ name, price: Number(price), category });
-        await newProduct.save();
+        // Ikkala bazaga parallel saqlash
+        const newLocalProduct = new LocalProduct({ name, price: Number(price), category });
+        const savedLocal = await newLocalProduct.save();
+
+        const newAtlasProduct = new AtlasProduct({ _id: savedLocal._id, name, price: Number(price), category });
+        await newAtlasProduct.save();
         
-        return res.status(201).json(newProduct);
+        return res.status(201).json(savedLocal);
     } catch (err) {
+        console.error(err);
         return res.status(500).json({ message: "Mahsulot qo'shishda xatolik!" });
     }
 });
 
-// 5. Mahsulotni o'chirish (DELETE - Himoyalangan)
+// 5. MAHSULOTNI O'CHIRISH (DELETE)
 app.delete('/api/products/:id', verifyToken, async (req, res) => {
     try {
-        await Product.findByIdAndDelete(req.params.id);
+        // Ikkala bazadan parallel o'chirish
+        await LocalProduct.findByIdAndDelete(req.params.id);
+        await AtlasProduct.findByIdAndDelete(req.params.id);
         return res.json({ message: "Mahsulot o'chirildi!" });
     } catch (err) {
         return res.status(500).json({ message: "O'chirishda xatolik yuz berdi!" });
     }
 });
 
-// Server Port Settings
+// Serverni portga qo'yish
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => console.log(`🚀 Backend server ${PORT}-portda yonib turibdi...`));
